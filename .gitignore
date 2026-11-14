@@ -7,6 +7,6 @@ coverage/
 .env*
 !.env.example
 
-# Runtime database snapshots contain customer and technician data.
+# Runtime database snapshots may contain customer and technician data.
 /data/*.json
 /data/*.tmp
