@@ -1,21 +1,13 @@
 import 'dotenv/config';
 import express from 'express';
-import http from 'http';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { registerApiRoutes } from './server/routes.js';
-import { realtimeHub } from './server/ws.js';
+import { createApp } from './server/app';
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT ?? 3000);
 
 async function startServer() {
-  const app = express();
-  app.use(express.json({ limit: '1mb' }));
-
-  registerApiRoutes(app);
-
-  const server = http.createServer(app);
-  realtimeHub.init(server);
+  const app = createApp();
 
   if (process.env.NODE_ENV === 'production') {
     const distDir = path.resolve(process.cwd(), 'dist');
@@ -31,7 +23,7 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  server.listen(PORT, '0.0.0.0', () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`VayuCare marketplace running on http://0.0.0.0:${PORT}`);
   });
 }

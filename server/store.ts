@@ -1,5 +1,3 @@
-import fs from 'fs';
-import path from 'path';
 import type {
   AdminOverviewStats,
   AuditLogEntry,
@@ -11,9 +9,10 @@ import type {
   ServicePackage,
   SlotAvailability,
   Technician,
-} from '../shared/types.js';
-import { generateRouteWaypoints, haversineDistanceKm } from './dispatch.js';
-import { calculatePriceSnapshot } from './pricing.js';
+} from '../shared/types';
+import { generateRouteWaypoints, haversineDistanceKm } from './dispatch';
+import { calculatePriceSnapshot } from './pricing';
+import { createSnapshotBackend, SNAPSHOT_BACKEND_HINT, type SnapshotBackend } from './persistence';
 
 export interface DatabaseState {
   serviceAreas: ServiceArea[];
@@ -47,9 +46,6 @@ export const VALID_STATE_TRANSITIONS: Record<BookingStatus, BookingStatus[]> = {
   COMPLETED: [],
   CANCELLED: [],
 };
-
-const DATA_DIR = path.resolve(process.cwd(), 'data');
-const DB_FILE = path.join(DATA_DIR, 'vayucare-db.json');
 
 function createSeedState(): DatabaseState {
   const now = new Date();
@@ -702,47 +698,107 @@ function createSeedState(): DatabaseState {
   };
 }
 
+interface SnapshotEnvelope {
+  version: number;
+  state: DatabaseState;
+}
+
+function isDatabaseState(value: unknown): value is DatabaseState {
+  const candidate = value as Partial<DatabaseState> | null;
+  return Boolean(candidate && Array.isArray(candidate.services) && Array.isArray(candidate.bookings));
+}
+
+function parseSnapshot(raw: string): SnapshotEnvelope | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === 'object' && 'state' in (parsed as Record<string, unknown>)) {
+      const envelope = parsed as { version?: unknown; state?: unknown };
+      if (!isDatabaseState(envelope.state)) return null;
+      return {
+        version: typeof envelope.version === 'number' ? envelope.version : 1,
+        state: envelope.state,
+      };
+    }
+    // Snapshots written before versioning stored the raw state object
+    // (data/vayucare-db.json in the repo).
+    if (isDatabaseState(parsed)) return { version: 1, state: parsed };
+    return null;
+  } catch (err) {
+    console.error('[vayucare] Failed to parse persisted snapshot:', err);
+    return null;
+  }
+}
+
 class PersistentStore {
   private state: DatabaseState;
+  private version = 1;
   private writeQueue: Promise<void> = Promise.resolve();
+  private readonly backend: SnapshotBackend = createSnapshotBackend();
+  private hydrated = false;
+  private lastSyncAt = 0;
 
   constructor() {
-    this.state = this.load();
+    const snapshot = this.backend.loadSync?.() ?? null;
+    const restored = snapshot ? parseSnapshot(snapshot) : null;
+    if (restored) {
+      this.state = restored.state;
+      this.version = restored.version;
+    } else {
+      this.state = createSeedState();
+      if (this.backend.kind === 'file') void this.persist();
+    }
+    if (this.backend.kind === 'memory') {
+      console.warn(`[vayucare] Using in-memory state only. ${SNAPSHOT_BACKEND_HINT}`);
+    }
   }
 
-  private load(): DatabaseState {
+  /**
+   * Refreshes state from the shared snapshot store before a request runs, so
+   * every serverless instance (and cold start) sees the same data.
+   */
+  async hydrate(force = false): Promise<void> {
+    if (this.backend.kind !== 'redis') {
+      this.hydrated = true;
+      return;
+    }
+    const now = Date.now();
+    if (!force && this.hydrated && now - this.lastSyncAt < 750) return;
+
     try {
-      if (!fs.existsSync(DATA_DIR)) {
-        fs.mkdirSync(DATA_DIR, { recursive: true });
-      }
-      if (fs.existsSync(DB_FILE)) {
-        const raw = fs.readFileSync(DB_FILE, 'utf-8');
-        const parsed = JSON.parse(raw) as DatabaseState;
-        if (parsed && Array.isArray(parsed.services) && Array.isArray(parsed.bookings)) {
-          return parsed;
-        }
+      await this.writeQueue;
+      const raw = await this.backend.load();
+      const snapshot = raw ? parseSnapshot(raw) : null;
+      if (snapshot) {
+        this.state = snapshot.state;
+        this.version = snapshot.version;
+      } else {
+        await this.persist();
       }
     } catch (err) {
-      console.error('Failed to read DB file, falling back to seed state:', err);
+      console.error('[vayucare] Snapshot sync failed, using this instance state:', err);
+    } finally {
+      this.hydrated = true;
+      this.lastSyncAt = Date.now();
     }
-    const seed = createSeedState();
-    this.persistSync(seed);
-    return seed;
   }
 
-  private persistSync(state: DatabaseState) {
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    const tempFile = `${DB_FILE}.tmp`;
-    fs.writeFileSync(tempFile, JSON.stringify(state, null, 2), 'utf-8');
-    fs.renameSync(tempFile, DB_FILE);
+  private persist(): Promise<void> {
+    const payload = JSON.stringify({ version: this.version, state: this.state } satisfies SnapshotEnvelope);
+    return this.backend.save(payload).catch((err) => {
+      console.error('[vayucare] Failed to persist snapshot:', err);
+    });
+  }
+
+  getVersion(): number {
+    return this.version;
   }
 
   async mutate<T>(fn: (draft: DatabaseState) => T): Promise<T> {
-    const run = this.writeQueue.then(() => {
+    const run = this.writeQueue.then(async () => {
+      await this.hydrate(true);
       const result = fn(this.state);
-      this.persistSync(this.state);
+      this.version += 1;
+      await this.persist();
       return result;
     });
     this.writeQueue = run.then(

@@ -3,75 +3,91 @@ import type { WSEvent } from '../../shared/types';
 
 type Listener = (event: WSEvent) => void;
 
-class SocketManager {
-  private ws: WebSocket | null = null;
+const POLL_INTERVAL_MS = 2000;
+
+interface RealtimeSnapshot {
+  seq: number;
+  version: number;
+  events: WSEvent[];
+}
+
+/**
+ * Realtime client for a serverless backend.
+ *
+ * Serverless functions cannot hold a WebSocket open, so the client polls
+ * `/api/realtime/events` with its last sequence number. Events produced by the
+ * instance it reaches are replayed exactly; when another instance handled the
+ * change (or the instance cold-started) the returned state version differs and
+ * consumers get an `ops:refresh` hint to reload their data.
+ */
+class RealtimePoller {
   private listeners = new Set<Listener>();
   private statusListeners = new Set<(connected: boolean) => void>();
-  private rooms = new Set<string>(['global']);
   private connected = false;
-  private reconnectTimer: number | null = null;
+  private started = false;
+  private polling = false;
+  private timer: number | null = null;
+  private seq = 0;
+  private version = 0;
+  private synchronised = false;
 
-  connect() {
-    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
-      return;
-    }
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws`;
-    const socket = new WebSocket(wsUrl);
-    this.ws = socket;
-
-    socket.onopen = () => {
-      this.connected = true;
-      this.statusListeners.forEach((cb) => cb(true));
-      for (const room of this.rooms) {
-        socket.send(JSON.stringify({ type: 'subscribe', room }));
-      }
-    };
-
-    socket.onmessage = (evt) => {
-      try {
-        const parsed = JSON.parse(evt.data) as WSEvent;
-        this.listeners.forEach((cb) => cb(parsed));
-      } catch {
-        // Ignore malformed event
-      }
-    };
-
-    socket.onclose = () => {
-      this.connected = false;
-      this.statusListeners.forEach((cb) => cb(false));
-      this.ws = null;
-      if (this.reconnectTimer === null) {
-        this.reconnectTimer = window.setTimeout(() => {
-          this.reconnectTimer = null;
-          this.connect();
-        }, 2000);
-      }
-    };
-
-    socket.onerror = () => {
-      socket.close();
-    };
+  private start() {
+    if (this.started) return;
+    this.started = true;
+    void this.poll();
+    this.timer = window.setInterval(() => {
+      void this.poll();
+    }, POLL_INTERVAL_MS);
   }
 
-  subscribeRoom(room: string) {
-    this.rooms.add(room);
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: 'subscribe', room }));
-    }
+  private setConnected(next: boolean) {
+    if (this.connected === next) return;
+    this.connected = next;
+    this.statusListeners.forEach((cb) => cb(next));
   }
 
-  unsubscribeRoom(room: string) {
-    if (room === 'global') return;
-    this.rooms.delete(room);
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify({ type: 'unsubscribe', room }));
+  private emit(event: WSEvent) {
+    this.listeners.forEach((cb) => cb(event));
+  }
+
+  private async poll() {
+    if (this.polling) return;
+    this.polling = true;
+    try {
+      const res = await fetch(`/api/realtime/events?since=${this.seq}`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (!res.ok) throw new Error(`Realtime poll failed (${res.status})`);
+      const data = (await res.json()) as RealtimeSnapshot;
+      this.setConnected(true);
+
+      if (!this.synchronised) {
+        this.synchronised = true;
+        this.seq = data.seq ?? 0;
+        this.version = data.version ?? 0;
+        return;
+      }
+
+      if (typeof data.seq === 'number' && data.seq > this.seq) {
+        this.seq = data.seq;
+        if (typeof data.version === 'number') this.version = data.version;
+        (Array.isArray(data.events) ? data.events : []).forEach((event) => this.emit(event));
+        return;
+      }
+
+      if (typeof data.version === 'number' && data.version !== this.version) {
+        this.version = data.version;
+        this.emit({ type: 'ops:refresh', payload: { reason: 'state-changed' } });
+      }
+    } catch {
+      this.setConnected(false);
+    } finally {
+      this.polling = false;
     }
   }
 
   onEvent(listener: Listener): () => void {
-    this.connect();
+    this.start();
     this.listeners.add(listener);
     return () => {
       this.listeners.delete(listener);
@@ -79,34 +95,36 @@ class SocketManager {
   }
 
   onStatus(listener: (connected: boolean) => void): () => void {
-    this.connect();
+    this.start();
     listener(this.connected);
     this.statusListeners.add(listener);
     return () => {
       this.statusListeners.delete(listener);
     };
   }
+
+  stop() {
+    if (this.timer !== null) {
+      window.clearInterval(this.timer);
+      this.timer = null;
+    }
+    this.started = false;
+  }
 }
 
-export const socketManager = new SocketManager();
+export const realtimeClient = new RealtimePoller();
 
-export function useRealtimeRoom(room: string | null, onEvent: (event: WSEvent) => void) {
+export function useRealtimeRoom(_room: string | null, onEvent: (event: WSEvent) => void) {
   const [connected, setConnected] = useState(false);
 
   useEffect(() => {
-    const offStatus = socketManager.onStatus(setConnected);
-    const offEvent = socketManager.onEvent(onEvent);
-    if (room) {
-      socketManager.subscribeRoom(room);
-    }
+    const offStatus = realtimeClient.onStatus(setConnected);
+    const offEvent = realtimeClient.onEvent(onEvent);
     return () => {
       offStatus();
       offEvent();
-      if (room) {
-        socketManager.unsubscribeRoom(room);
-      }
     };
-  }, [room, onEvent]);
+  }, [onEvent]);
 
   return { connected };
 }

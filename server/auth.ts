@@ -1,20 +1,22 @@
 import crypto from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
-import type { AuthUser, UserRole } from '../shared/types.js';
-import { db } from './store.js';
-
-interface SessionRecord {
-  token: string;
-  user: AuthUser;
-  expiresAt: number;
-}
+import type { AuthUser, UserRole } from '../shared/types';
+import { db } from './store';
 
 export interface AuthenticatedRequest extends Request {
   authUser?: AuthUser;
 }
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const sessions = new Map<string, SessionRecord>();
+
+// Session tokens are signed and stateless so a sign-in survives a serverless
+// instance being replaced between requests.
+const SESSION_SECRET = process.env.SESSION_SECRET ?? 'vayucare-local-dev-secret';
+const revokedTokens = new Set<string>();
+
+function signSessionPayload(payload: string): string {
+  return crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+}
 
 // Scrypt-hashed credentials for Admin and Technician portal accounts (no plaintext passwords stored)
 const SALT = 'vayucare-jaipur-v1';
@@ -63,28 +65,43 @@ export function normalizePhone(raw: string): string {
 }
 
 export function createSession(user: AuthUser): string {
-  const token = crypto.randomBytes(32).toString('hex');
-  sessions.set(token, {
-    token,
-    user,
-    expiresAt: Date.now() + SESSION_TTL_MS,
-  });
-  return token;
+  const payload = Buffer.from(
+    JSON.stringify({ user, exp: Date.now() + SESSION_TTL_MS }),
+    'utf-8',
+  ).toString('base64url');
+  return `${payload}.${signSessionPayload(payload)}`;
 }
 
 export function getSessionUser(token: string | undefined): AuthUser | null {
-  if (!token) return null;
-  const rec = sessions.get(token);
-  if (!rec) return null;
-  if (Date.now() > rec.expiresAt) {
-    sessions.delete(token);
+  if (!token || revokedTokens.has(token)) return null;
+
+  const separator = token.lastIndexOf('.');
+  if (separator <= 0) return null;
+
+  const payload = token.slice(0, separator);
+  const signature = token.slice(separator + 1);
+  const expected = signSessionPayload(payload);
+  if (
+    signature.length !== expected.length ||
+    !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
+  ) {
     return null;
   }
-  return rec.user;
+
+  try {
+    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8')) as {
+      user?: AuthUser;
+      exp?: number;
+    };
+    if (!parsed?.user || typeof parsed.exp !== 'number' || Date.now() > parsed.exp) return null;
+    return parsed.user;
+  } catch {
+    return null;
+  }
 }
 
 export function revokeSession(token: string | undefined) {
-  if (token) sessions.delete(token);
+  if (token) revokedTokens.add(token);
 }
 
 export function extractBearerToken(req: Request): string | undefined {

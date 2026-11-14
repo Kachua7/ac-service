@@ -133,6 +133,8 @@ export function TrackingView({
         setBookings((prev) =>
           prev.some((b) => b.id === created.id) ? prev : [created, ...prev],
         );
+      } else if (event.type === 'ops:refresh') {
+        void loadBookings();
       } else if (event.type === 'technician:location') {
         if (selectedId === event.payload.bookingId) {
           setBooking((prev) =>
@@ -149,7 +151,7 @@ export function TrackingView({
         }
       }
     },
-    [selectedId],
+    [selectedId, loadBookings],
   );
 
   const { connected: wsConnected } = useRealtimeRoom(

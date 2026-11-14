@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { authenticateUser, getSessionUser } from './auth.js';
-import { findAndRankTechnicians, haversineDistanceKm } from './dispatch.js';
-import { calculatePriceSnapshot, calculateQuoteTotals } from './pricing.js';
-import { db, VALID_STATE_TRANSITIONS } from './store.js';
+import { authenticateUser, getSessionUser } from './auth';
+import { findAndRankTechnicians, haversineDistanceKm } from './dispatch';
+import { calculatePriceSnapshot, calculateQuoteTotals } from './pricing';
+import { db, VALID_STATE_TRANSITIONS } from './store';
 
 test('calculatePriceSnapshot applies multi-unit discount, coupon, and 18% GST accurately', () => {
   const state = db.read();

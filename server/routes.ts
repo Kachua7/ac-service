@@ -6,7 +6,7 @@ import type {
   LatLng,
   RepairQuote,
   ServiceArea,
-} from '../shared/types.js';
+} from '../shared/types';
 import {
   type AuthenticatedRequest,
   authenticateUser,
@@ -15,23 +15,68 @@ import {
   normalizePhone,
   requireAuth,
   revokeSession,
-} from './auth.js';
+} from './auth';
 import {
   findAndRankTechnicians,
   generateRouteWaypoints,
   haversineDistanceKm,
-} from './dispatch.js';
-import { calculatePriceSnapshot, calculateQuoteTotals } from './pricing.js';
-import { db, TIME_SLOTS, VALID_STATE_TRANSITIONS } from './store.js';
-import { realtimeHub } from './ws.js';
+} from './dispatch';
+import { calculatePriceSnapshot, calculateQuoteTotals } from './pricing';
+import { db, TIME_SLOTS, VALID_STATE_TRANSITIONS } from './store';
+import { realtimeHub } from './realtime';
 
-const activeAutoDrivers = new Map<string, NodeJS.Timeout>();
+const AUTO_DRIVE_STEP_MS = 1200;
+let lastAutoDriveAdvanceAt = 0;
 
-function stopAutoDrive(bookingId: string) {
-  const timer = activeAutoDrivers.get(bookingId);
-  if (timer) {
-    clearInterval(timer);
-    activeAutoDrivers.delete(bookingId);
+/**
+ * Serverless functions cannot keep timers alive between requests, so the
+ * simulated "auto drive" is advanced by the realtime poll that every open
+ * client already sends. On a long-running host the result is identical.
+ */
+async function advanceAutoDrivingBookings() {
+  if (Date.now() - lastAutoDriveAdvanceAt < AUTO_DRIVE_STEP_MS) return;
+  lastAutoDriveAdvanceAt = Date.now();
+
+  const moving = db
+    .read()
+    .bookings.filter((b) => b.tracking?.autoDriving && b.status === 'TECHNICIAN_EN_ROUTE');
+
+  for (const booking of moving) {
+    let updated: Booking | null = null;
+    try {
+      updated = await db.mutate((draft) => {
+        const target = draft.bookings.find((item) => item.id === booking.id);
+        if (!target || !target.tracking || target.status !== 'TECHNICIAN_EN_ROUTE') return null;
+
+        const waypoints = target.tracking.routeWaypoints;
+        const maxIdx = waypoints.length - 1;
+        const currentIdx = Math.round((target.tracking.routeProgressPct / 100) * maxIdx);
+        const nextIdx = Math.min(maxIdx, currentIdx + 1);
+        const nextLoc = waypoints[nextIdx];
+        const dist = haversineDistanceKm(nextLoc, target.tracking.destinationLocation);
+        const pct = maxIdx > 0 ? Math.round((nextIdx / maxIdx) * 100) : 100;
+
+        target.tracking.currentLocation = nextLoc;
+        target.tracking.routeProgressPct = pct;
+        target.tracking.distanceRemainingKm = dist;
+        target.tracking.etaMinutes = pct >= 100 ? 0 : Math.max(1, Math.round(dist * 3.8));
+        target.tracking.lastUpdatedAt = new Date().toISOString();
+
+        if (pct >= 100) target.tracking.autoDriving = false;
+
+        return target;
+      });
+    } catch (err) {
+      console.error('[vayucare] Auto-drive step failed:', err);
+      continue;
+    }
+
+    if (updated?.tracking) {
+      realtimeHub.broadcastBookingUpdate(updated.id, {
+        type: 'technician:location',
+        payload: { bookingId: updated.id, tracking: updated.tracking },
+      });
+    }
   }
 }
 
@@ -108,6 +153,20 @@ const quoteSubmissionSchema = z.object({
 export function registerApiRoutes(app: Express) {
   app.get('/api/health', (_req: Request, res: Response) => {
     res.json({ ok: true, service: 'vayucare-marketplace', timestamp: new Date().toISOString() });
+  });
+
+  // Realtime transport: clients poll for events after their last sequence
+  // number instead of holding a WebSocket (unsupported on serverless).
+  app.get('/api/realtime/events', async (req: Request, res: Response) => {
+    await advanceAutoDrivingBookings();
+    const rawSince = Number(req.query.since ?? 0);
+    const since = Number.isFinite(rawSince) && rawSince > 0 ? rawSince : 0;
+    res.set('Cache-Control', 'no-store');
+    res.json({
+      seq: realtimeHub.getSeq(),
+      version: db.getVersion(),
+      events: realtimeHub.since(since),
+    });
   });
 
   // --- AUTHENTICATION & SESSION APIs ---
@@ -523,7 +582,6 @@ export function registerApiRoutes(app: Express) {
         if (!VALID_STATE_TRANSITIONS[booking.status].includes('CANCELLED')) {
           throw new Error('INVALID_TRANSITION');
         }
-        stopAutoDrive(booking.id);
         const nowIso = new Date().toISOString();
         booking.status = 'CANCELLED';
         if (booking.paymentStatus === 'PAID') {
@@ -921,7 +979,6 @@ export function registerApiRoutes(app: Express) {
         if (!booking) throw new Error('NOT_FOUND');
         if (booking.assignedTechnicianId !== technicianId) throw new Error('FORBIDDEN');
 
-        stopAutoDrive(booking.id);
         const rejecter = draft.technicians.find((t) => t.id === technicianId);
         booking.rejectedTechnicianIds.push(technicianId);
         if (rejecter) {
@@ -1043,7 +1100,6 @@ export function registerApiRoutes(app: Express) {
         }
 
         if (nextStatus === 'TECHNICIAN_ARRIVED' && booking.tracking) {
-          stopAutoDrive(booking.id);
           booking.tracking.autoDriving = false;
           booking.tracking.currentLocation = booking.tracking.destinationLocation;
           booking.tracking.routeProgressPct = 100;
@@ -1058,7 +1114,6 @@ export function registerApiRoutes(app: Express) {
         }
 
         if (nextStatus === 'COMPLETED') {
-          stopAutoDrive(booking.id);
           booking.completedAt = nowIso;
           booking.paymentStatus = 'PAID';
           if (notes) booking.completionNotes = notes;
@@ -1203,7 +1258,6 @@ export function registerApiRoutes(app: Express) {
       return;
     }
 
-    stopAutoDrive(bookingId);
 
     await db.mutate((draft) => {
       const b = draft.bookings.find((item) => item.id === bookingId);
@@ -1212,50 +1266,6 @@ export function registerApiRoutes(app: Express) {
       }
     });
 
-    if (enabled) {
-      const timer = setInterval(async () => {
-        let shouldStop = false;
-        const updated = await db.mutate((draft) => {
-          const b = draft.bookings.find((item) => item.id === bookingId);
-          if (!b || !b.tracking || b.status !== 'TECHNICIAN_EN_ROUTE') {
-            shouldStop = true;
-            return null;
-          }
-          const waypoints = b.tracking.routeWaypoints;
-          const maxIdx = waypoints.length - 1;
-          const currentIdx = Math.round((b.tracking.routeProgressPct / 100) * maxIdx);
-          const nextIdx = Math.min(maxIdx, currentIdx + 1);
-          const nextLoc = waypoints[nextIdx];
-          const dist = haversineDistanceKm(nextLoc, b.tracking.destinationLocation);
-          const pct = Math.round((nextIdx / maxIdx) * 100);
-          const nowIso = new Date().toISOString();
-
-          b.tracking.currentLocation = nextLoc;
-          b.tracking.routeProgressPct = pct;
-          b.tracking.distanceRemainingKm = dist;
-          b.tracking.etaMinutes = pct >= 100 ? 0 : Math.max(1, Math.round(dist * 3.8));
-          b.tracking.lastUpdatedAt = nowIso;
-
-          if (pct >= 100) {
-            b.tracking.autoDriving = false;
-            shouldStop = true;
-          }
-          return b;
-        });
-
-        if (updated?.tracking) {
-          realtimeHub.broadcastBookingUpdate(bookingId, {
-            type: 'technician:location',
-            payload: { bookingId, tracking: updated.tracking },
-          });
-        }
-        if (shouldStop) {
-          stopAutoDrive(bookingId);
-        }
-      }, 1500);
-
-      activeAutoDrivers.set(bookingId, timer);
-    }
 
     const refreshed = db.read().bookings.find((b) => b.id === bookingId)!;
     if (refreshed.tracking) {
@@ -1381,7 +1391,6 @@ export function registerApiRoutes(app: Express) {
         if (!booking || !tech) throw new Error('NOT_FOUND');
         if (tech.verificationStatus !== 'APPROVED') throw new Error('UNVERIFIED_TECH');
 
-        stopAutoDrive(booking.id);
         const nowIso = new Date().toISOString();
         const dist = haversineDistanceKm(tech.currentLocation, booking.address.coordinates);
         booking.assignedTechnicianId = tech.id;

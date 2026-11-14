@@ -5,8 +5,8 @@ A full-stack AC service booking and operations app for Jaipur/Rajasthan. It incl
 ## Stack
 
 - React 19, TypeScript, Vite 8, Tailwind CSS 4
-- Express 4 API and WebSocket server
-- File-backed JSON store for local/demo use
+- Express 4 API, run locally by `tsx` and as a single Vercel Function in production
+- File-backed JSON store locally, Redis snapshot store when configured
 - Bun lockfile (`bun.lock`) for reproducible dependency installation
 
 ## Requirements
@@ -24,7 +24,7 @@ bun install --frozen-lockfile
 bun run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The server serves the Vite app and the API/WebSocket endpoints from the same process. Set `PORT` in `.env` to use a different port.
+Open [http://localhost:3000](http://localhost:3000). The server serves the Vite app and the API endpoints from the same process. Set `PORT` in `.env` to use a different port.
 
 ### Local demo access
 
@@ -47,6 +47,19 @@ NODE_ENV=production bun run start  # Serve the production build
 ```
 
 For production, run `bun run build` before starting the server with `NODE_ENV=production`. The application expects the generated `dist/` directory to be present.
+
+## Deploy on Vercel
+
+The Vite client is built into `dist/`, and the Express API runs as a single Vercel Function from `api/index.ts`. `vercel.json` already sets the build command, the output directory, and the `/api/*` rewrite.
+
+1. Import the repository at [vercel.com/new](https://vercel.com/new).
+2. Add these environment variables (Project → Settings → Environment Variables):
+   - `SESSION_SECRET` — long random string used to sign portal session tokens.
+   - `ADMIN_EMAIL`, `ADMIN_PASSCODE`, `TECH_PASSCODE` — required by the server whenever `NODE_ENV=production`, which Vercel sets automatically. Without them the API refuses to start.
+   - `KV_REST_API_URL` and `KV_REST_API_TOKEN` — from an Upstash Redis / Vercel KV marketplace integration. Optional, but without them each function instance keeps bookings in memory and reseeds on a cold start.
+3. Redeploy.
+
+Realtime updates (technician location, new bookings, chat) are delivered by polling `GET /api/realtime/events?since=<seq>` every two seconds, because a serverless function cannot hold a WebSocket open.
 
 ## Data and security notes
 
