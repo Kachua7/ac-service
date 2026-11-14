@@ -6,4 +6,7 @@ coverage/
 *.log
 .env*
 !.env.example
-.freebuff/
+
+# Runtime database snapshots contain customer and technician data.
+/data/*.json
+/data/*.tmp
