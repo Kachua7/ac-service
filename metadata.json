@@ -1,0 +1,6 @@
+{
+  "name": "VayuCare — AC Service & Live Technician Tracking",
+  "description": "Book transparent AC servicing, repairs, and gas refills across Jaipur & Rajasthan with real-time technician arrival tracking, itemised quote approvals, and operations dispatch.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
