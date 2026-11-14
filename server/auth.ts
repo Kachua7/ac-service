@@ -37,8 +37,19 @@ const adminEmail = process.env.ADMIN_EMAIL ?? (isProduction ? '' : 'ops@example.
 const adminPasscode = process.env.ADMIN_PASSCODE ?? (isProduction ? '' : 'admin-demo-only');
 const technicianPasscode = process.env.TECH_PASSCODE ?? (isProduction ? '' : 'tech-demo-only');
 
-if (isProduction && (!adminEmail || !adminPasscode || !technicianPasscode)) {
-  throw new Error('Production requires ADMIN_EMAIL, ADMIN_PASSCODE, and TECH_PASSCODE.');
+const PRIVILEGED_SIGN_IN_DISABLED =
+  'Admin and technician sign-in is disabled on this deployment until ADMIN_EMAIL, ADMIN_PASSCODE and TECH_PASSCODE are configured.';
+
+// Missing production credentials must never fall back to the demo values, but
+// they also must not take the whole API down: the customer flow stays usable and
+// privileged sign-in is rejected with an explicit message instead.
+const privilegedSignInDisabled =
+  isProduction && (!adminEmail || !adminPasscode || !technicianPasscode);
+
+if (privilegedSignInDisabled) {
+  console.warn(
+    '[vayucare] ADMIN_EMAIL, ADMIN_PASSCODE or TECH_PASSCODE is not set: admin and technician sign-in is disabled on this deployment.',
+  );
 }
 
 // Demo credentials are available only outside production. Production must provide
@@ -164,6 +175,9 @@ export function authenticateUser(params: {
   }
 
   if (role === 'TECHNICIAN') {
+    if (privilegedSignInDisabled) {
+      return { error: PRIVILEGED_SIGN_IN_DISABLED, status: 503 };
+    }
     const cleanPhone = normalizePhone(identifier);
     const state = db.read();
     const tech = state.technicians.find(
@@ -186,6 +200,9 @@ export function authenticateUser(params: {
   }
 
   if (role === 'ADMIN') {
+    if (privilegedSignInDisabled) {
+      return { error: PRIVILEGED_SIGN_IN_DISABLED, status: 503 };
+    }
     const cleanEmail = identifier.trim().toLowerCase();
     const admin = ADMIN_ACCOUNTS.find((a) => a.email === cleanEmail);
     if (!admin || !verifySecret(passcode.trim(), admin.passcodeHash)) {

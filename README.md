@@ -55,7 +55,7 @@ The Vite client is built into `dist/`, and the Express API runs as a single Verc
 1. Import the repository at [vercel.com/new](https://vercel.com/new).
 2. Add these environment variables (Project → Settings → Environment Variables):
    - `SESSION_SECRET` — long random string used to sign portal session tokens.
-   - `ADMIN_EMAIL`, `ADMIN_PASSCODE`, `TECH_PASSCODE` — required by the server whenever `NODE_ENV=production`, which Vercel sets automatically. Without them the API refuses to start.
+   - `ADMIN_EMAIL`, `ADMIN_PASSCODE`, `TECH_PASSCODE` — required for admin and technician sign-in in production, which Vercel sets automatically. Without them the site stays usable for customers, but admin and technician sign-in returns 503 rather than falling back to the demo credentials.
    - `KV_REST_API_URL` and `KV_REST_API_TOKEN` — from an Upstash Redis / Vercel KV marketplace integration. Optional, but without them each function instance keeps bookings in memory and reseeds on a cold start.
 3. Redeploy.
 
