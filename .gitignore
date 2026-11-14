@@ -6,10 +6,4 @@ coverage/
 *.log
 .env*
 !.env.example
-.freebuff/
-package-lock.json
-
-# Runtime database snapshots may contain customer and technician data.
-/data/*.json
-/data/*.tmp
 data/

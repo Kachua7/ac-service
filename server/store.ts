@@ -9,10 +9,10 @@ import type {
   ServicePackage,
   SlotAvailability,
   Technician,
-} from '../shared/types';
-import { generateRouteWaypoints, haversineDistanceKm } from './dispatch';
-import { calculatePriceSnapshot } from './pricing';
-import { createSnapshotBackend, SNAPSHOT_BACKEND_HINT, type SnapshotBackend } from './persistence';
+} from '../shared/types.js';
+import { generateRouteWaypoints, haversineDistanceKm } from './dispatch.js';
+import { createSnapshotBackend, type SnapshotBackend } from './persistence.js';
+import { calculatePriceSnapshot } from './pricing.js';
 
 export interface DatabaseState {
   serviceAreas: ServiceArea[];
@@ -384,8 +384,8 @@ function createSeedState(): DatabaseState {
   const technicians: Technician[] = [
     {
       id: 'tech-rajendra',
-      name: 'Technician One',
-      phone: '+91 00000 00001',
+      name: 'Rajendra Sharma',
+      phone: '+91 98290 41205',
       city: 'Jaipur',
       baseLocality: 'Vaishali Nagar',
       serviceAreaIds: ['area-jpr-vaishali', 'area-jpr-mansarovar', 'area-jpr-cscheme'],
@@ -404,8 +404,8 @@ function createSeedState(): DatabaseState {
     },
     {
       id: 'tech-vikram',
-      name: 'Technician Two',
-      phone: '+91 00000 00002',
+      name: 'Vikram Singh Rathore',
+      phone: '+91 98291 77310',
       city: 'Jaipur',
       baseLocality: 'Malviya Nagar',
       serviceAreaIds: ['area-jpr-malviya', 'area-jpr-jagatpura', 'area-jpr-rajapark'],
@@ -424,8 +424,8 @@ function createSeedState(): DatabaseState {
     },
     {
       id: 'tech-deepak',
-      name: 'Technician Three',
-      phone: '+91 00000 00003',
+      name: 'Deepak Kumawat',
+      phone: '+91 99280 55421',
       city: 'Jaipur',
       baseLocality: 'C-Scheme',
       serviceAreaIds: ['area-jpr-cscheme', 'area-jpr-rajapark', 'area-jpr-vidyadhar'],
@@ -444,8 +444,8 @@ function createSeedState(): DatabaseState {
     },
     {
       id: 'tech-arvind',
-      name: 'Technician Four',
-      phone: '+91 00000 00004',
+      name: 'Arvind Meena',
+      phone: '+91 97840 11902',
       city: 'Jaipur',
       baseLocality: 'Vidyadhar Nagar',
       serviceAreaIds: ['area-jpr-vidyadhar', 'area-jpr-vaishali'],
@@ -505,17 +505,17 @@ function createSeedState(): DatabaseState {
         symptoms: ['Low cooling', 'Outdoor unit vibrating'],
       },
       address: {
-        customerName: 'Demo Customer One',
-        phone: '+91 00000 00005',
+        customerName: 'Ananya Rathore',
+        phone: '+91 98290 66214',
         pinCode: '302021',
         city: 'Jaipur',
         state: 'Rajasthan',
         locality: 'Vaishali Nagar',
         serviceAreaId: 'area-jpr-vaishali',
-        houseNo: 'Demo House',
-        street: 'Demo Service Lane',
-        landmark: 'Demo Landmark',
-        instructions: 'Demo service instructions',
+        houseNo: 'B-42, Amrapali Circle',
+        street: 'Vaishali Marg',
+        landmark: 'Near National Handloom',
+        instructions: 'Call at security gate 2 upon arrival.',
         coordinates: liveDest,
       },
       scheduledDate: todayStr,
@@ -547,7 +547,7 @@ function createSeedState(): DatabaseState {
           title: 'Booking confirmed & paid via UPI',
           description: 'UPI payment verified (₹353 incl. GST).',
           actorRole: 'CUSTOMER',
-          actorName: 'Demo User',
+          actorName: 'Ananya Rathore',
           timestamp: thirtyMinsAgo,
         },
         {
@@ -556,7 +556,7 @@ function createSeedState(): DatabaseState {
           title: 'Technician Rajendra Sharma assigned',
           description: 'Verified Inverter Split AC specialist accepted your job.',
           actorRole: 'TECHNICIAN',
-          actorName: 'Demo User',
+          actorName: 'Rajendra Sharma',
           timestamp: fifteenMinsAgo,
         },
         {
@@ -565,7 +565,7 @@ function createSeedState(): DatabaseState {
           title: 'Technician is on the way',
           description: 'Departed from Sodala hub toward Amrapali Circle, Vaishali Nagar.',
           actorRole: 'TECHNICIAN',
-          actorName: 'Demo User',
+          actorName: 'Rajendra Sharma',
           timestamp: fiveMinsAgo,
         },
       ],
@@ -602,16 +602,16 @@ function createSeedState(): DatabaseState {
         symptoms: ['Seasonal dust buildup'],
       },
       address: {
-        customerName: 'Demo Customer Two',
-        phone: '+91 00000 00006',
+        customerName: 'Siddharth Agarwal',
+        phone: '+91 98281 30041',
         pinCode: '302017',
         city: 'Jaipur',
         state: 'Rajasthan',
         locality: 'Malviya Nagar',
         serviceAreaId: 'area-jpr-malviya',
-        houseNo: 'Demo House',
-        street: 'Demo Service Lane',
-        landmark: 'Demo Landmark',
+        houseNo: '14/88, Sector 14',
+        street: 'Gaurav Tower Road',
+        landmark: 'Opposite World Trade Park',
         coordinates: { lat: 26.8545, lng: 75.8058 },
       },
       scheduledDate: twoDaysAgo.slice(0, 10),
@@ -632,7 +632,7 @@ function createSeedState(): DatabaseState {
           title: 'Booking confirmed',
           description: 'Paid ₹1,211 via UPI (2 units + JAIPUR100).',
           actorRole: 'CUSTOMER',
-          actorName: 'Demo User',
+          actorName: 'Siddharth Agarwal',
           timestamp: twoDaysAgo,
         },
         {
@@ -641,7 +641,7 @@ function createSeedState(): DatabaseState {
           title: 'Service completed & verified',
           description: '30-day Foam-Jet workmanship warranty activated.',
           actorRole: 'TECHNICIAN',
-          actorName: 'Demo User',
+          actorName: 'Vikram Singh Rathore',
           timestamp: twoDaysAgo,
         },
       ],
@@ -651,7 +651,7 @@ function createSeedState(): DatabaseState {
         rating: 5,
         serviceQualityRating: 5,
         punctualityRating: 5,
-        customerName: 'Demo Customer Three',
+        customerName: 'Siddharth Agarwal',
         locality: 'Malviya Nagar, Jaipur',
         comment:
           'Vikram arrived 5 minutes early, put waterproof jackets on both LG units so zero water hit our walls, and showed the coil temperature drop on his meter.',
@@ -668,7 +668,7 @@ function createSeedState(): DatabaseState {
     {
       id: 'aud-1',
       actorRole: 'SYSTEM',
-      actorName: 'Demo User',
+      actorName: 'Dispatch Engine',
       action: 'TECH_ASSIGNED',
       entityType: 'BOOKING',
       entityId: 'bk-live-4082',
@@ -678,7 +678,7 @@ function createSeedState(): DatabaseState {
     {
       id: 'aud-2',
       actorRole: 'SYSTEM',
-      actorName: 'Demo User',
+      actorName: 'Onboarding Queue',
       action: 'TECH_APPLICATION_RECEIVED',
       entityType: 'TECHNICIAN',
       entityId: 'tech-arvind',
@@ -704,27 +704,30 @@ interface SnapshotEnvelope {
 }
 
 function isDatabaseState(value: unknown): value is DatabaseState {
-  const candidate = value as Partial<DatabaseState> | null;
-  return Boolean(candidate && Array.isArray(candidate.services) && Array.isArray(candidate.bookings));
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Partial<DatabaseState>;
+  return Array.isArray(candidate.services) && Array.isArray(candidate.bookings);
 }
 
 function parseSnapshot(raw: string): SnapshotEnvelope | null {
   try {
     const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === 'object' && 'state' in (parsed as Record<string, unknown>)) {
-      const envelope = parsed as { version?: unknown; state?: unknown };
-      if (!isDatabaseState(envelope.state)) return null;
-      return {
-        version: typeof envelope.version === 'number' ? envelope.version : 1,
-        state: envelope.state,
-      };
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      'version' in parsed &&
+      'state' in parsed &&
+      typeof (parsed as SnapshotEnvelope).version === 'number' &&
+      isDatabaseState((parsed as SnapshotEnvelope).state)
+    ) {
+      return parsed as SnapshotEnvelope;
     }
-    // Snapshots written before versioning stored the raw state object
-    // (data/vayucare-db.json in the repo).
-    if (isDatabaseState(parsed)) return { version: 1, state: parsed };
+    if (isDatabaseState(parsed)) {
+      return { version: 1, state: parsed };
+    }
     return null;
   } catch (err) {
-    console.error('[vayucare] Failed to parse persisted snapshot:', err);
+    console.error('[vayucare] Failed to parse snapshot:', err);
     return null;
   }
 }
@@ -738,24 +741,19 @@ class PersistentStore {
   private lastSyncAt = 0;
 
   constructor() {
-    const snapshot = this.backend.loadSync?.() ?? null;
-    const restored = snapshot ? parseSnapshot(snapshot) : null;
+    const raw = this.backend.loadSync?.() ?? null;
+    const restored = raw ? parseSnapshot(raw) : null;
     if (restored) {
       this.state = restored.state;
       this.version = restored.version;
     } else {
       this.state = createSeedState();
-      if (this.backend.kind === 'file') void this.persist();
-    }
-    if (this.backend.kind === 'memory') {
-      console.warn(`[vayucare] Using in-memory state only. ${SNAPSHOT_BACKEND_HINT}`);
+      if (this.backend.kind === 'file') {
+        void this.persist();
+      }
     }
   }
 
-  /**
-   * Refreshes state from the shared snapshot store before a request runs, so
-   * every serverless instance (and cold start) sees the same data.
-   */
   async hydrate(force = false): Promise<void> {
     if (this.backend.kind !== 'redis') {
       this.hydrated = true;
@@ -767,15 +765,15 @@ class PersistentStore {
     try {
       await this.writeQueue;
       const raw = await this.backend.load();
-      const snapshot = raw ? parseSnapshot(raw) : null;
-      if (snapshot) {
-        this.state = snapshot.state;
-        this.version = snapshot.version;
+      const restored = raw ? parseSnapshot(raw) : null;
+      if (restored) {
+        this.state = restored.state;
+        this.version = restored.version;
       } else {
         await this.persist();
       }
     } catch (err) {
-      console.error('[vayucare] Snapshot sync failed, using this instance state:', err);
+      console.error('[vayucare] Snapshot hydration failed, keeping current state:', err);
     } finally {
       this.hydrated = true;
       this.lastSyncAt = Date.now();
@@ -783,7 +781,11 @@ class PersistentStore {
   }
 
   private persist(): Promise<void> {
-    const payload = JSON.stringify({ version: this.version, state: this.state } satisfies SnapshotEnvelope);
+    const payload = JSON.stringify(
+      { version: this.version, state: this.state } satisfies SnapshotEnvelope,
+      null,
+      this.backend.kind === 'file' ? 2 : 0,
+    );
     return this.backend.save(payload).catch((err) => {
       console.error('[vayucare] Failed to persist snapshot:', err);
     });

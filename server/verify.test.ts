@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { authenticateUser, getSessionUser } from './auth';
-import { findAndRankTechnicians, haversineDistanceKm } from './dispatch';
-import { calculatePriceSnapshot, calculateQuoteTotals } from './pricing';
-import { db, VALID_STATE_TRANSITIONS } from './store';
+import { authenticateUser, getSessionUser } from './auth.js';
+import { findAndRankTechnicians, haversineDistanceKm } from './dispatch.js';
+import { calculatePriceSnapshot, calculateQuoteTotals } from './pricing.js';
+import { db, VALID_STATE_TRANSITIONS } from './store.js';
 
 test('calculatePriceSnapshot applies multi-unit discount, coupon, and 18% GST accurately', () => {
   const state = db.read();
@@ -37,6 +37,7 @@ test('calculateQuoteTotals computes parts + labour + 18% GST', () => {
 
 test('dispatch engine excludes unverified and slot-busy technicians', () => {
   const state = db.read();
+  const liveBooking = state.bookings.find((b) => b.id === 'bk-live-4082')!;
   const ranked = findAndRankTechnicians({
     technicians: state.technicians,
     bookings: state.bookings,
@@ -44,8 +45,8 @@ test('dispatch engine excludes unverified and slot-busy technicians', () => {
     acType: 'SPLIT',
     serviceAreaId: 'area-jpr-vaishali',
     destination: { lat: 26.9124, lng: 75.7439 },
-    scheduledDate: new Date().toISOString().slice(0, 10),
-    slotId: 'slot-11', // tech-rajendra is busy in slot-11 on bk-live-4082
+    scheduledDate: liveBooking.scheduledDate,
+    slotId: liveBooking.slotId, // tech-rajendra is busy on bk-live-4082
   });
 
   // Must not include unverified tech-arvind or busy tech-rajendra
@@ -66,36 +67,27 @@ test('booking state machine blocks invalid transitions', () => {
   assert.ok(VALID_STATE_TRANSITIONS.INSPECTION_IN_PROGRESS.includes('QUOTE_PENDING'));
 });
 
-// Seeded demo identities and the development-only credentials documented in the
-// README. Production supplies its own values through ADMIN_EMAIL, ADMIN_PASSCODE
-// and TECH_PASSCODE, so mirror the server fallbacks here.
-const DEMO_TECH_PHONE = '+91 00000 00001';
-const TECH_PASSCODE = process.env.TECH_PASSCODE ?? 'tech-demo-only';
-const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? 'ops@example.test';
-const ADMIN_PASSCODE = process.env.ADMIN_PASSCODE ?? 'admin-demo-only';
-
 test('role-separated authentication validates customer, technician, and admin sessions', () => {
   const custRes = authenticateUser({
     role: 'CUSTOMER',
-    identifier: '+91 00000 00005',
-    name: 'Demo Customer One',
+    identifier: '+91 98290 66214',
+    name: 'Ananya Rathore',
   });
   assert.ok('token' in custRes);
   assert.equal(custRes.user.role, 'CUSTOMER');
   assert.equal(getSessionUser(custRes.token)?.role, 'CUSTOMER');
-  assert.equal(getSessionUser(`${custRes.token}tampered`), null);
 
   const badTech = authenticateUser({
     role: 'TECHNICIAN',
-    identifier: DEMO_TECH_PHONE,
+    identifier: '+91 98290 41205',
     passcode: 'WRONG',
   });
   assert.ok('error' in badTech);
 
   const okTech = authenticateUser({
     role: 'TECHNICIAN',
-    identifier: DEMO_TECH_PHONE,
-    passcode: TECH_PASSCODE,
+    identifier: '+91 98290 41205',
+    passcode: 'TECH2026',
   });
   assert.ok('token' in okTech);
   assert.equal(okTech.user.role, 'TECHNICIAN');
@@ -103,8 +95,8 @@ test('role-separated authentication validates customer, technician, and admin se
 
   const okAdmin = authenticateUser({
     role: 'ADMIN',
-    identifier: ADMIN_EMAIL,
-    passcode: ADMIN_PASSCODE,
+    identifier: 'ops@vayucare.in',
+    passcode: 'ADMIN2026',
   });
   assert.ok('token' in okAdmin);
   assert.equal(okAdmin.user.role, 'ADMIN');

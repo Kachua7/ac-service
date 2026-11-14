@@ -1,13 +1,17 @@
 import 'dotenv/config';
 import express from 'express';
+import http from 'http';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { createApp } from './server/app';
+import { createApp } from './server/app.js';
+import { realtimeHub } from './server/ws.js';
 
-const PORT = Number(process.env.PORT ?? 3000);
+const PORT = Number(process.env.PORT) || 3000;
 
 async function startServer() {
   const app = createApp();
+  const server = http.createServer(app);
+  realtimeHub.init(server);
 
   if (process.env.NODE_ENV === 'production') {
     const distDir = path.resolve(process.cwd(), 'dist');
@@ -23,7 +27,7 @@ async function startServer() {
     app.use(vite.middlewares);
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  server.listen(PORT, '0.0.0.0', () => {
     console.log(`VayuCare marketplace running on http://0.0.0.0:${PORT}`);
   });
 }

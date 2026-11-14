@@ -4,7 +4,7 @@ import type {
   LatLng,
   ServiceCategory,
   Technician,
-} from '../shared/types';
+} from '../shared/types.js';
 
 export function haversineDistanceKm(a: LatLng, b: LatLng): number {
   const toRad = (deg: number) => (deg * Math.PI) / 180;

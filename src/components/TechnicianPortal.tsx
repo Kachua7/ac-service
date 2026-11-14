@@ -70,9 +70,7 @@ export function TechnicianPortal() {
 
   const handleWsEvent = useCallback(
     (event: WSEvent) => {
-      if (event.type === 'ops:refresh') {
-        loadPortal();
-      } else if (event.type === 'booking:updated' || event.type === 'booking:created') {
+      if (event.type === 'booking:updated' || event.type === 'booking:created') {
         const b = event.payload.booking as EnrichedBooking;
         if (!activeTech || b.assignedTechnicianId === activeTech.id) {
           loadPortal();

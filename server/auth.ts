@@ -1,21 +1,18 @@
 import crypto from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
-import type { AuthUser, UserRole } from '../shared/types';
-import { db } from './store';
+import type { AuthUser, UserRole } from '../shared/types.js';
+import { db } from './store.js';
 
 export interface AuthenticatedRequest extends Request {
   authUser?: AuthUser;
 }
 
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-
-// Session tokens are signed and stateless so a sign-in survives a serverless
-// instance being replaced between requests.
 const SESSION_SECRET = process.env.SESSION_SECRET ?? 'vayucare-local-dev-secret';
 const revokedTokens = new Set<string>();
 
-function signSessionPayload(payload: string): string {
-  return crypto.createHmac('sha256', SESSION_SECRET).update(payload).digest('base64url');
+function signPayload(encodedPayload: string): string {
+  return crypto.createHmac('sha256', SESSION_SECRET).update(encodedPayload).digest('base64url');
 }
 
 // Scrypt-hashed credentials for Admin and Technician portal accounts (no plaintext passwords stored)
@@ -32,42 +29,20 @@ function verifySecret(plain: string, expectedHash: string): boolean {
   return crypto.timingSafeEqual(actualBuf, expectedBuf);
 }
 
-const isProduction = process.env.NODE_ENV === 'production';
-const adminEmail = process.env.ADMIN_EMAIL ?? (isProduction ? '' : 'ops@example.test');
-const adminPasscode = process.env.ADMIN_PASSCODE ?? (isProduction ? '' : 'admin-demo-only');
-const technicianPasscode = process.env.TECH_PASSCODE ?? (isProduction ? '' : 'tech-demo-only');
+const adminEmail = (process.env.ADMIN_EMAIL ?? 'ops@vayucare.in').trim().toLowerCase();
+const adminPasscode = (process.env.ADMIN_PASSCODE ?? 'ADMIN2026').trim();
+const techPasscode = (process.env.TECH_PASSCODE ?? 'TECH2026').trim();
 
-const PRIVILEGED_SIGN_IN_DISABLED =
-  'Admin and technician sign-in is disabled on this deployment until ADMIN_EMAIL, ADMIN_PASSCODE and TECH_PASSCODE are configured.';
+const ADMIN_ACCOUNTS = [
+  {
+    id: 'adm-jaipur-1',
+    email: adminEmail,
+    name: 'Jaipur Operations Lead',
+    passcodeHash: hashSecret(adminPasscode),
+  },
+];
 
-// Missing production credentials must never fall back to the demo values, but
-// they also must not take the whole API down: the customer flow stays usable and
-// privileged sign-in is rejected with an explicit message instead.
-const privilegedSignInDisabled =
-  isProduction && (!adminEmail || !adminPasscode || !technicianPasscode);
-
-if (privilegedSignInDisabled) {
-  console.warn(
-    '[vayucare] ADMIN_EMAIL, ADMIN_PASSCODE or TECH_PASSCODE is not set: admin and technician sign-in is disabled on this deployment.',
-  );
-}
-
-// Demo credentials are available only outside production. Production must provide
-// ADMIN_EMAIL, ADMIN_PASSCODE, and TECH_PASSCODE through its secret manager.
-const ADMIN_ACCOUNTS =
-  adminEmail && adminPasscode
-    ? [
-        {
-          id: 'adm-jaipur-1',
-          email: adminEmail.trim().toLowerCase(),
-          name: 'Jaipur Operations Lead',
-          passcodeHash: hashSecret(adminPasscode),
-        },
-      ]
-    : [];
-
-const TECH_PASSCODE_HASH = technicianPasscode ? hashSecret(technicianPasscode) : '';
-
+const TECH_PASSCODE_HASH = hashSecret(techPasscode);
 
 export function normalizePhone(raw: string): string {
   const digits = raw.replace(/\D/g, '');
@@ -76,35 +51,38 @@ export function normalizePhone(raw: string): string {
 }
 
 export function createSession(user: AuthUser): string {
-  const payload = Buffer.from(
-    JSON.stringify({ user, exp: Date.now() + SESSION_TTL_MS }),
-    'utf-8',
-  ).toString('base64url');
-  return `${payload}.${signSessionPayload(payload)}`;
+  const payload = {
+    user,
+    exp: Date.now() + SESSION_TTL_MS,
+    jti: crypto.randomBytes(12).toString('hex'),
+  };
+  const encoded = Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64url');
+  const sig = signPayload(encoded);
+  return `${encoded}.${sig}`;
 }
 
 export function getSessionUser(token: string | undefined): AuthUser | null {
   if (!token || revokedTokens.has(token)) return null;
+  const dotIdx = token.indexOf('.');
+  if (dotIdx <= 0) return null;
 
-  const separator = token.lastIndexOf('.');
-  if (separator <= 0) return null;
-
-  const payload = token.slice(0, separator);
-  const signature = token.slice(separator + 1);
-  const expected = signSessionPayload(payload);
-  if (
-    signature.length !== expected.length ||
-    !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))
-  ) {
+  const encoded = token.slice(0, dotIdx);
+  const sig = token.slice(dotIdx + 1);
+  const expectedSig = signPayload(encoded);
+  const sigBuf = Buffer.from(sig, 'utf-8');
+  const expectedBuf = Buffer.from(expectedSig, 'utf-8');
+  if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
     return null;
   }
 
   try {
-    const parsed = JSON.parse(Buffer.from(payload, 'base64url').toString('utf-8')) as {
+    const parsed = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf-8')) as {
       user?: AuthUser;
       exp?: number;
     };
-    if (!parsed?.user || typeof parsed.exp !== 'number' || Date.now() > parsed.exp) return null;
+    if (!parsed.user || typeof parsed.exp !== 'number' || Date.now() > parsed.exp) {
+      return null;
+    }
     return parsed.user;
   } catch {
     return null;
@@ -175,9 +153,6 @@ export function authenticateUser(params: {
   }
 
   if (role === 'TECHNICIAN') {
-    if (privilegedSignInDisabled) {
-      return { error: PRIVILEGED_SIGN_IN_DISABLED, status: 503 };
-    }
     const cleanPhone = normalizePhone(identifier);
     const state = db.read();
     const tech = state.technicians.find(
@@ -200,9 +175,6 @@ export function authenticateUser(params: {
   }
 
   if (role === 'ADMIN') {
-    if (privilegedSignInDisabled) {
-      return { error: PRIVILEGED_SIGN_IN_DISABLED, status: 503 };
-    }
     const cleanEmail = identifier.trim().toLowerCase();
     const admin = ADMIN_ACCOUNTS.find((a) => a.email === cleanEmail);
     if (!admin || !verifySecret(passcode.trim(), admin.passcodeHash)) {

@@ -1,18 +1,11 @@
 import express, { type Express } from 'express';
-import { registerApiRoutes } from './routes';
-import { db } from './store';
+import { registerApiRoutes } from './routes.js';
+import { db } from './store.js';
 
-/**
- * Builds the API application without any local-dev concerns (no Vite
- * middleware, no listening socket), so the same code runs under `tsx` locally
- * and inside a Vercel serverless function.
- */
 export function createApp(): Express {
   const app = express();
   app.use(express.json({ limit: '1mb' }));
 
-  // Pull the latest persisted snapshot before handling the request. On hosts
-  // with local state (dev, containers) this is a no-op.
   app.use(async (_req, _res, next) => {
     try {
       await db.hydrate();
@@ -23,6 +16,5 @@ export function createApp(): Express {
   });
 
   registerApiRoutes(app);
-
   return app;
 }

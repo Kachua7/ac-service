@@ -1,4 +1,4 @@
-import type { Coupon, PriceSnapshot, RepairQuote, ServicePackage } from '../shared/types';
+import type { Coupon, PriceSnapshot, RepairQuote, ServicePackage } from '../shared/types.js';
 
 export const GST_RATE_PCT = 18;
 

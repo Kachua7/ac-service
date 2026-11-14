@@ -2,25 +2,19 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 /**
- * Snapshot persistence backends for the VayuCare JSON state.
- *
- * - `redis`: Upstash-compatible REST Redis (Vercel KV / Upstash marketplace
- *   integration). Works from serverless functions because it is a plain HTTPS
- *   call, so a snapshot survives cold starts and is shared by every instance.
- * - `file`: local development / long-running Node hosts, writing data/vayucare-db.json.
- * - `memory`: last-resort fallback (e.g. Vercel without a KV integration), where
- *   state lives for the lifetime of one warm function instance only.
+ * Snapshot persistence backends for VayuCare JSON state:
+ * - `redis`: Upstash / Vercel KV REST API (survives cold starts across serverless instances).
+ * - `file`: Local filesystem (`data/vayucare-db.json`) for local dev and Node containers.
+ * - `memory`: Safe fallback on Vercel when KV/Redis env vars are not configured.
  */
 export interface SnapshotBackend {
   readonly kind: 'redis' | 'file' | 'memory';
-  /** Synchronous bootstrap used by long-running Node hosts. */
   loadSync?(): string | null;
   load(): Promise<string | null>;
   save(payload: string): Promise<void>;
 }
 
 const SNAPSHOT_KEY = 'vayucare:state:v1';
-
 const DATA_DIR = path.resolve(process.cwd(), 'data');
 const DB_FILE = path.join(DATA_DIR, 'vayucare-db.json');
 
@@ -90,7 +84,7 @@ function createMemoryBackend(): SnapshotBackend {
       return null;
     },
     async save() {
-      // No durable target configured; the in-memory state is all we keep.
+      // Ephemeral per-instance memory when running on Vercel without KV/Redis.
     },
   };
 }
@@ -98,10 +92,6 @@ function createMemoryBackend(): SnapshotBackend {
 export function createSnapshotBackend(): SnapshotBackend {
   const redis = readRedisConfig();
   if (redis) return createRedisBackend(redis);
-  // Serverless filesystems are read-only/ephemeral, so skip the file backend there.
   if (!process.env.VERCEL) return createFileBackend();
   return createMemoryBackend();
 }
-
-export const SNAPSHOT_BACKEND_HINT =
-  'Connect an Upstash Redis / Vercel KV integration and set KV_REST_API_URL and KV_REST_API_TOKEN to persist VayuCare data on Vercel.';
