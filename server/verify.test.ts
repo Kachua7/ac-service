@@ -66,27 +66,36 @@ test('booking state machine blocks invalid transitions', () => {
   assert.ok(VALID_STATE_TRANSITIONS.INSPECTION_IN_PROGRESS.includes('QUOTE_PENDING'));
 });
 
+// Seeded demo identities and the development-only credentials documented in the
+// README. Production supplies its own values through ADMIN_EMAIL, ADMIN_PASSCODE
+// and TECH_PASSCODE, so mirror the server fallbacks here.
+const DEMO_TECH_PHONE = '+91 00000 00001';
+const TECH_PASSCODE = process.env.TECH_PASSCODE ?? 'tech-demo-only';
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL ?? 'ops@example.test';
+const ADMIN_PASSCODE = process.env.ADMIN_PASSCODE ?? 'admin-demo-only';
+
 test('role-separated authentication validates customer, technician, and admin sessions', () => {
   const custRes = authenticateUser({
     role: 'CUSTOMER',
-    identifier: '+91 98290 66214',
-    name: 'Ananya Rathore',
+    identifier: '+91 00000 00005',
+    name: 'Demo Customer One',
   });
   assert.ok('token' in custRes);
   assert.equal(custRes.user.role, 'CUSTOMER');
   assert.equal(getSessionUser(custRes.token)?.role, 'CUSTOMER');
+  assert.equal(getSessionUser(`${custRes.token}tampered`), null);
 
   const badTech = authenticateUser({
     role: 'TECHNICIAN',
-    identifier: '+91 98290 41205',
+    identifier: DEMO_TECH_PHONE,
     passcode: 'WRONG',
   });
   assert.ok('error' in badTech);
 
   const okTech = authenticateUser({
     role: 'TECHNICIAN',
-    identifier: '+91 98290 41205',
-    passcode: 'TECH2026',
+    identifier: DEMO_TECH_PHONE,
+    passcode: TECH_PASSCODE,
   });
   assert.ok('token' in okTech);
   assert.equal(okTech.user.role, 'TECHNICIAN');
@@ -94,8 +103,8 @@ test('role-separated authentication validates customer, technician, and admin se
 
   const okAdmin = authenticateUser({
     role: 'ADMIN',
-    identifier: 'ops@vayucare.in',
-    passcode: 'ADMIN2026',
+    identifier: ADMIN_EMAIL,
+    passcode: ADMIN_PASSCODE,
   });
   assert.ok('token' in okAdmin);
   assert.equal(okAdmin.user.role, 'ADMIN');
