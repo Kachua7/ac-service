@@ -30,16 +30,31 @@ function verifySecret(plain: string, expectedHash: string): boolean {
   return crypto.timingSafeEqual(actualBuf, expectedBuf);
 }
 
-const ADMIN_ACCOUNTS = [
-  {
-    id: 'adm-jaipur-1',
-    email: 'ops@vayucare.in',
-    name: 'Jaipur Operations Lead',
-    passcodeHash: hashSecret('ADMIN2026'),
-  },
-];
+const isProduction = process.env.NODE_ENV === 'production';
+const adminEmail = process.env.ADMIN_EMAIL ?? (isProduction ? '' : 'ops@example.test');
+const adminPasscode = process.env.ADMIN_PASSCODE ?? (isProduction ? '' : 'admin-demo-only');
+const technicianPasscode = process.env.TECH_PASSCODE ?? (isProduction ? '' : 'tech-demo-only');
 
-const TECH_PASSCODE_HASH = hashSecret('TECH2026');
+if (isProduction && (!adminEmail || !adminPasscode || !technicianPasscode)) {
+  throw new Error('Production requires ADMIN_EMAIL, ADMIN_PASSCODE, and TECH_PASSCODE.');
+}
+
+// Demo credentials are available only outside production. Production must provide
+// ADMIN_EMAIL, ADMIN_PASSCODE, and TECH_PASSCODE through its secret manager.
+const ADMIN_ACCOUNTS =
+  adminEmail && adminPasscode
+    ? [
+        {
+          id: 'adm-jaipur-1',
+          email: adminEmail.trim().toLowerCase(),
+          name: 'Jaipur Operations Lead',
+          passcodeHash: hashSecret(adminPasscode),
+        },
+      ]
+    : [];
+
+const TECH_PASSCODE_HASH = technicianPasscode ? hashSecret(technicianPasscode) : '';
+
 
 export function normalizePhone(raw: string): string {
   const digits = raw.replace(/\D/g, '');
