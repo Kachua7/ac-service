@@ -655,7 +655,7 @@ function createSeedState(): DatabaseState {
         rating: 5,
         serviceQualityRating: 5,
         punctualityRating: 5,
-        customerName: 'Demo Customer Two',
+        customerName: 'Demo Customer Three',
         locality: 'Malviya Nagar, Jaipur',
         comment:
           'Vikram arrived 5 minutes early, put waterproof jackets on both LG units so zero water hit our walls, and showed the coil temperature drop on his meter.',
